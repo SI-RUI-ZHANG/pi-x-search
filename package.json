@@ -1,6 +1,6 @@
 {
   "name": "pi-x-search",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Search X from the pi coding agent with verbatim post quotes and resolved source URLs.",
   "type": "module",
   "license": "MIT",

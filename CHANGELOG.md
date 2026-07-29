@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.1.1 - 2026-07-30
+
+- Drop source titles that only restate the URL, so the model reads each source
+  once instead of twice.
+- Remove the annotation offsets xAI never populates.
+- Tell the model to prefer one well-scoped search per call, and name Twitter in
+  the tool description so it finds the tool either way.
+- Redesign the hero image and rewrite the README.
+- Compare the provenance workflow path as repository-relative, matching npm's
+  SLSA predicate, so release verification passes.
+
 ## 0.1.0 - 2026-07-29
 
 - Implement the `x_search` tool against xAI's official Responses API.
