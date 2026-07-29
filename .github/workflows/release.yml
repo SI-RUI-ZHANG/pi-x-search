@@ -1,0 +1,256 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify-package:
+    name: verify-package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      target_sha: ${{ steps.verify-tag.outputs.target_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+      - name: Verify signed annotated release tag
+        id: verify-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_ref=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME")
+          test "$(jq -r '.object.type' <<<"$tag_ref")" = "tag"
+          tag_object_sha=$(jq -r '.object.sha' <<<"$tag_ref")
+          tag_object=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object_sha")
+          test "$(jq -r '.verification.verified' <<<"$tag_object")" = "true"
+          test "$(jq -r '.verification.reason' <<<"$tag_object")" = "valid"
+          target_sha=$(jq -r '.object.sha' <<<"$tag_object")
+          test "$(jq -r '.object.type' <<<"$tag_object")" = "commit"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$target_sha" origin/main
+          test "$(git rev-parse "$GITHUB_REF_NAME^{commit}")" = "$target_sha"
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
+      - run: npm ci --ignore-scripts
+      - run: npm run verify
+      - run: npm run check:release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Confirm verification left tracked source unchanged
+        shell: bash
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain --untracked-files=no)"
+      - name: Pack and smoke-test the exact release artifact
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack --json --ignore-scripts > pack.json
+          package_file=$(node -e 'const p=require("./pack.json"); if (!Array.isArray(p) || p.length !== 1) process.exit(1); process.stdout.write(p[0].filename)' 2>/dev/null || true)
+          test -n "$package_file"
+          test -f "$package_file"
+          before=$(sha512sum "$package_file" | cut -d' ' -f1)
+          package_dir=$(mktemp -d)
+          trap 'rm -rf "$package_dir"' EXIT
+          tar -xzf "$package_file" -C "$package_dir"
+          ./node_modules/.bin/pi --offline \
+            --no-extensions --no-skills --no-prompt-templates --no-context-files \
+            -e "$package_dir/package/extensions/x-search.ts" \
+            --list-models xai
+          after=$(sha512sum "$package_file" | cut -d' ' -f1)
+          test "$before" = "$after"
+          echo "package_file=$package_file" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: npm-package-${{ github.ref_name }}
+          path: |
+            ${{ steps.pack.outputs.package_file }}
+            pack.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-npm:
+    name: publish-npm
+    needs: verify-package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: npm-package-${{ github.ref_name }}
+          path: dist
+      - name: Validate tested artifact
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { createHash } = require("node:crypto");
+          const { readFileSync, readdirSync } = require("node:fs");
+          const { basename, join } = require("node:path");
+          const packs = JSON.parse(readFileSync("dist/pack.json", "utf8"));
+          if (!Array.isArray(packs) || packs.length !== 1) throw new Error("pack.json must describe one package");
+          const pack = packs[0];
+          const files = readdirSync("dist").filter((name) => name.endsWith(".tgz"));
+          if (files.length !== 1 || files[0] !== pack.filename) throw new Error("artifact tarball does not match pack.json");
+          const [algorithm, expected] = pack.integrity.split("-", 2);
+          const actual = createHash(algorithm).update(readFileSync(join("dist", pack.filename))).digest("base64");
+          if (actual !== expected) throw new Error("artifact integrity mismatch");
+          const output = process.env.GITHUB_OUTPUT;
+          require("node:fs").appendFileSync(output, `name=${pack.name}\nversion=${pack.version}\nintegrity=${pack.integrity}\ntarball=${join("dist", basename(pack.filename))}\n`);
+          NODE
+      - name: Require provenance-capable npm CLI
+        shell: bash
+        run: |
+          node -e 'const [a,b]=process.argv[1].split(".").map(Number); if (a<11 || (a===11 && b<5)) process.exit(1)' "$(npm --version)"
+      - name: Write registry verifier
+        shell: bash
+        run: |
+          cat > /tmp/verify-registry.mjs <<'NODE'
+          import { appendFileSync } from "node:fs";
+
+          const mode = process.argv[2];
+          const name = process.env.PACKAGE_NAME;
+          const version = process.env.PACKAGE_VERSION;
+          const expectedIntegrity = process.env.EXPECTED_INTEGRITY;
+          const expectedRepository = `https://github.com/${process.env.GITHUB_REPOSITORY}`;
+          const expectedWorkflow = `${expectedRepository}/.github/workflows/release.yml`;
+          const expectedRef = `refs/tags/${process.env.GITHUB_REF_NAME}`;
+          const expectedSha = process.env.EXPECTED_SHA;
+          const expectedSha512 = Buffer.from(expectedIntegrity.split("-", 2)[1], "base64").toString("hex");
+          const metadataUrl = `https://registry.npmjs.org/${encodeURIComponent(name)}/${encodeURIComponent(version)}`;
+
+          async function inspect() {
+            const response = await fetch(metadataUrl, { headers: { accept: "application/json" } });
+            if (response.status === 404) return { state: "absent" };
+            if (!response.ok) throw new Error(`registry returned HTTP ${response.status}`);
+            const metadata = await response.json();
+            if (metadata.dist?.integrity !== expectedIntegrity) throw new Error("published integrity differs from tested artifact");
+            const attestationUrl = metadata.dist?.attestations?.url;
+            if (!attestationUrl) throw new Error("published package has no attestations URL");
+            const attestationsResponse = await fetch(attestationUrl);
+            if (!attestationsResponse.ok) throw new Error(`attestations returned HTTP ${attestationsResponse.status}`);
+            const attestations = await attestationsResponse.json();
+            const provenance = attestations.attestations?.find((item) => item.predicateType === "https://slsa.dev/provenance/v1");
+            if (!provenance) throw new Error("published package has no SLSA provenance");
+            const bundle = typeof provenance.bundle === "string" ? JSON.parse(provenance.bundle) : provenance.bundle;
+            const statement = JSON.parse(Buffer.from(bundle.dsseEnvelope.payload, "base64").toString("utf8"));
+            const external = statement.predicate?.buildDefinition?.externalParameters;
+            const dependency = statement.predicate?.buildDefinition?.resolvedDependencies?.[0];
+            const subject = statement.subject?.[0];
+            if (external?.workflow?.repository !== expectedRepository) throw new Error("provenance repository mismatch");
+            if (external?.workflow?.path !== expectedWorkflow) throw new Error("provenance workflow mismatch");
+            if (external?.workflow?.ref !== expectedRef) throw new Error("provenance ref mismatch");
+            if (dependency?.digest?.gitCommit !== expectedSha) throw new Error("provenance commit mismatch");
+            if (subject?.digest?.sha512 !== expectedSha512) throw new Error("provenance subject digest mismatch");
+            return { state: "valid" };
+          }
+
+          if (mode === "preflight") {
+            const result = await inspect();
+            appendFileSync(process.env.GITHUB_OUTPUT, `publish_required=${result.state === "absent"}\n`);
+          } else if (mode === "wait") {
+            let lastError;
+            for (let attempt = 0; attempt < 24; attempt += 1) {
+              try {
+                const result = await inspect();
+                if (result.state === "valid") process.exit(0);
+              } catch (error) {
+                lastError = error;
+                if (!String(error.message).includes("registry returned HTTP 5")) throw error;
+              }
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+            }
+            throw lastError ?? new Error("published package did not become visible with valid provenance");
+          } else {
+            throw new Error(`unknown mode: ${mode}`);
+          }
+          NODE
+      - name: Check registry state
+        id: preflight
+        env:
+          PACKAGE_NAME: ${{ steps.artifact.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.artifact.outputs.version }}
+          EXPECTED_INTEGRITY: ${{ steps.artifact.outputs.integrity }}
+          EXPECTED_SHA: ${{ needs.verify-package.outputs.target_sha }}
+        run: node /tmp/verify-registry.mjs preflight
+      - name: Publish npm package with provenance
+        if: steps.preflight.outputs.publish_required == 'true'
+        id: publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TARBALL: ${{ steps.artifact.outputs.tarball }}
+        shell: bash
+        run: |
+          set +e
+          npm publish "$TARBALL" \
+            --registry=https://registry.npmjs.org \
+            --access=public \
+            --provenance \
+            --ignore-scripts \
+            --tag=latest
+          status=$?
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+      - name: Confirm registry integrity and provenance
+        env:
+          PACKAGE_NAME: ${{ steps.artifact.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.artifact.outputs.version }}
+          EXPECTED_INTEGRITY: ${{ steps.artifact.outputs.integrity }}
+          EXPECTED_SHA: ${{ needs.verify-package.outputs.target_sha }}
+        run: node /tmp/verify-registry.mjs wait
+
+  create-github-release:
+    name: create-github-release
+    needs: [verify-package, publish-npm]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Create or verify GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if release=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease 2>/dev/null); then
+            test "$(jq -r '.tagName' <<<"$release")" = "$tag"
+            test "$(jq -r '.isDraft' <<<"$release")" = "false"
+            test "$(jq -r '.isPrerelease' <<<"$release")" = "false"
+            exit 0
+          fi
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            --latest

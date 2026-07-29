@@ -10,7 +10,7 @@
   sanitized errors, cancellation, and the zero-search retry guard.
 - Add structured TUI rendering plus unit tests for auth, transport, contracts,
   retry outcomes, and terminal-control sanitization.
-- Add package-gallery artwork, a security policy, packed-artifact CI, and a
-  release-manifest guard.
+- Add package-gallery artwork, a security policy, packed-artifact CI, a
+  fail-closed release manifest, and tag-gated npm provenance publishing.
 - Verify isolated live searches through both subscription OAuth and
   `XAI_API_KEY`.
