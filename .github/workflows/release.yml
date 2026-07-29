@@ -142,7 +142,8 @@ jobs:
           const version = process.env.PACKAGE_VERSION;
           const expectedIntegrity = process.env.EXPECTED_INTEGRITY;
           const expectedRepository = `https://github.com/${process.env.GITHUB_REPOSITORY}`;
-          const expectedWorkflow = `${expectedRepository}/.github/workflows/release.yml`;
+          // npm's SLSA provenance records the workflow path relative to the repository root.
+          const expectedWorkflow = ".github/workflows/release.yml";
           const expectedRef = `refs/tags/${process.env.GITHUB_REF_NAME}`;
           const expectedSha = process.env.EXPECTED_SHA;
           const expectedSha512 = Buffer.from(expectedIntegrity.split("-", 2)[1], "base64").toString("hex");

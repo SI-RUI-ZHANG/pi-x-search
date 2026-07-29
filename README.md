@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/SI-RUI-ZHANG/pi-x-search/main/docs/assets/hero.png" alt="pi-x-search — the post's actual words, with a link that lets you verify them" width="800"/>
+  <img src="https://raw.githubusercontent.com/SI-RUI-ZHANG/pi-x-search/main/docs/assets/hero.png" alt="pi-x-search — quote the post, not the summary" width="800"/>
 </p>
 
 <p align="center">
@@ -11,150 +11,139 @@
 
 # pi-x-search
 
-Search X from the [pi](https://pi.dev) coding agent and get the posts' **actual
-words with a source URL for each one**.
+Search X from the [pi](https://pi.dev) coding agent.
 
-Not just a paragraph *about* the posts. The posts, quoted verbatim, followed by
-the links a human can open and check.
+xAI runs `x_search` on their own servers and hands back a paragraph. The posts
+it read do not come back with it, and the `citations` field the documentation
+points at is `null` in practice, so a client that reads it ends up with a
+confident summary and nothing behind it.
 
-> Automated verification and isolated live runs pass for both subscription OAuth
-> and `XAI_API_KEY`.
-
-## Tool
-
-| Tool | What it does |
-|---|---|
-| `x_search` | Search X through xAI's official Responses API and return a direct answer, verbatim post quotes, and annotation-derived source URLs |
-
-Optional filters narrow the search by allowed or excluded handles, date range,
-and image or video understanding. Video understanding is specific to X search;
-ordinary web search cannot inspect video attached to a post.
+`pi-x-search` asks for the posts' own words, takes the URLs from where they
+actually are, and throws out answers that never searched.
 
 ## Install
 
 ```bash
 pi install npm:pi-x-search
-pi install git:github.com/SI-RUI-ZHANG/pi-x-search@v0.1.0
+pi install git:github.com/SI-RUI-ZHANG/pi-x-search@v0.1.1
 ```
 
-Then start pi and ask naturally:
+Then ask for what you want:
 
 ```text
-Use x_search to find the latest posts from @<handle> about <topic>.
-Quote the key posts verbatim and include their URLs.
+Find the latest posts from @<handle> about <topic>.
+Quote the key ones and include their URLs.
 ```
 
 ## What it looks like
 
-Illustrative output—the public example intentionally uses placeholders:
-
 ```text
-❯ Search X for <topic> from @<handle>
+❯ Search X for what people are saying about the Responses API
 
-N sources · M search calls · Grok subscription
+9 sources · 4 search calls · Grok subscription
 
-> “<verbatim post text>”
-  https://x.com/<handle>/status/<post-id>
+“the annotations carry the source URLs. the top-level citations
+field has been null in every response i have seen.”
+https://x.com/i/status/1951…
+
+“it reads the video attached to a post. web search cannot do that.”
+https://x.com/i/status/1950…
 ```
 
-An isolated subscription-OAuth acceptance run returned nonzero search telemetry,
-an annotation-derived URL, and a quote that matched the linked post. Its account,
-post text, and identifiers are intentionally not reproduced here. A narrower
-query in the same pass produced no grounded result and was rejected rather than
-returned as a plausible answer.
+The quoted text above is illustrative and the post ids are cut short. Real
+results carry the full URL.
 
 ## How it works
 
-1. **Authenticate through pi** — resolve pi's built-in `xai` provider. The
-   extension never reads the Grok CLI's credential store and implements no token
-   persistence or refresh logic of its own.
-2. **Search one fixed origin** — send the request only to
-   `https://api.x.ai/v1/responses`, with redirects rejected before an
-   Authorization header can follow them elsewhere.
-3. **Prove that search happened** — inspect
-   `usage.server_side_tool_usage_details.x_search_calls`. A zero-search answer is
-   retried once and then rejected if it still did not search.
-4. **Recover the real sources** — parse `url_citation` annotations from output
-   text. The documented top-level `citations` field is usually `null` in live
-   responses, so trusting it alone loses every source.
+1. **Ask.** Every request carries the same instruction: answer the question,
+   then quote the key posts word for word with each URL beside its quote.
+   Without it, nothing is ever quoted in full and there is nothing to cite. It
+   also makes the answer shorter rather than longer, because the model stops
+   padding with paraphrase.
+2. **Read.** Sources come from the `url_citation` annotations on the output
+   text. Reading the documented top-level `citations` field instead returns
+   nothing at all.
+3. **Check.** `usage.server_side_tool_usage_details.x_search_calls` records
+   whether a search ran. Zero means the model answered from memory, which
+   happened in roughly one run in eight: retry once, then fail instead of
+   passing it off as a result.
 
-The full request contract, failure matrix, and measured API behavior are in
-[docs/design.md](./docs/design.md).
-
-## Authentication
-
-Choose either path:
-
-### Grok subscription
-
-Run `/login` in pi and select **xAI (Grok/X subscription)**. Pi owns credential
-persistence and serialized refresh. The extension receives only the
-resolved access credential at execution time.
-
-### xAI API key
-
-Set `XAI_API_KEY` before starting pi. A stored subscription login takes
-precedence; an OAuth refresh or request failure never silently falls through to
-the billed API key.
-
-Subscription OAuth uses the public first-party CLI client id built into pi's
-`xai` provider because xAI currently publishes no third-party client-registration
-endpoint. Users who do not want that path can use `XAI_API_KEY` exclusively.
-
-## Safety model
-
-- The authenticated search endpoint is immutable and official.
-- Redirects are rejected; upstream error bodies never enter agent context.
-- Response bytes, JSON depth, and JSON node count are bounded before traversal.
-- Model-facing tool output is capped below pi's 50 KB limit.
-- Post text is labeled as untrusted source material, and terminal control
-  sequences are removed before model or TUI rendering.
-- No credential value is logged, returned, placed in details, or read from the
-  Grok CLI.
-- A confident answer with zero recorded X-search calls fails closed.
+The measurements behind those choices, the request contract, and the full
+failure matrix are in [docs/design.md](./docs/design.md).
 
 ## Filters
 
 | Parameter | Behavior |
 |---|---|
-| `allowed_x_handles` | Search only these handles; maximum 20 |
-| `excluded_x_handles` | Exclude these handles; maximum 20 |
-| `from_date` / `to_date` | Inclusive real calendar dates in `YYYY-MM-DD` |
-| `enable_image_understanding` | Analyze images attached to matching posts |
-| `enable_video_understanding` | Analyze video attached to matching posts |
+| `allowed_x_handles` | Search only these handles, up to 20 |
+| `excluded_x_handles` | Skip these handles, up to 20 |
+| `from_date` / `to_date` | Inclusive calendar dates, `YYYY-MM-DD` |
+| `enable_image_understanding` | Look at images attached to matching posts |
+| `enable_video_understanding` | Look at video attached to matching posts |
 
-Leading `@` characters are normalized and duplicate handles are removed.
-Allow- and deny-lists are mutually exclusive.
+A leading `@` is optional and duplicate handles are dropped. The two handle
+lists are mutually exclusive. Video understanding is specific to X search;
+ordinary web search cannot inspect a video attached to a post.
+
+## Authentication
+
+Either path works, and both belong to pi's built-in `xai` provider.
+
+**Grok subscription.** Run `/login` in pi and pick **xAI (Grok/X subscription)**.
+pi stores the credential and serializes refresh; the extension only receives the
+resolved token at the moment a search runs.
+
+**API key.** Set `XAI_API_KEY` before starting pi. A stored subscription login
+takes precedence, and a failed refresh or a rejected request never quietly falls
+through to the billed key.
+
+Subscription login goes through the first-party CLI's OAuth client id, because
+xAI publishes no way for anyone else to register their own. If you would rather
+not rely on that, use `XAI_API_KEY` alone.
+
+The extension never touches the Grok CLI's credential store. xAI's refresh
+tokens are single-use, so borrowing one would log you out of your own CLI.
+
+## Safety model
+
+- Requests go to `https://api.x.ai/v1/responses` and nowhere else. Redirects are
+  rejected before an Authorization header can follow one somewhere else.
+- No credential value is logged, returned, or placed in tool details.
+- Upstream error bodies are classified by status code and then dropped, so a
+  hostile error page cannot reach your agent's context.
+- Response size, JSON depth, and node count are capped before anything is read,
+  and model-facing output stays under pi's 50 KB limit.
+- Post text is untrusted third-party content. It is labeled that way for the
+  model, and terminal control sequences are stripped before anything renders.
 
 ## Limitations
 
-- xAI performs the server-side search. Recall, ranking, and freshness are theirs.
-- The API exposes synthesized text and citation annotations, not structured post
-  objects, engagement metrics, complete thread trees, or authoritative authorship
-  metadata.
-- “Verbatim” is an instruction to the search model, not a cryptographic proof.
-  The URL is included so important quotes can be checked.
+- xAI does the searching. Recall, ranking, and freshness are theirs.
+- The API returns synthesized text and citations, not post objects. There are no
+  engagement counts, no author metadata, and no thread trees; that is the API
+  boundary, not something a client can work around.
+- Verbatim is an instruction to the search model, not a guarantee. The URL sits
+  beside every quote so you can check the ones that matter.
 
 ## Compatibility
 
 Requires pi v0.82.1 or later.
 
-`pi-x-search` and [`pi-grok`](https://github.com/stnly/pi-grok) both register the
-conventional `x_search` name. They are alternative implementations and should
-not be enabled together; pi reports the duplicate and keeps the first one loaded.
+`pi-x-search` and [`pi-grok`](https://github.com/stnly/pi-grok) both register a
+tool named `x_search`. Enable one or the other; pi reports the duplicate and
+keeps whichever loaded first.
 
 ## Acknowledgements
 
-The extension builds on lessons from
-[`stnly/pi-grok`](https://github.com/stnly/pi-grok) and
-[Hermes Agent](https://github.com/NousResearch/hermes-agent). Their work provided
-valuable prior art for pi integration and xAI's annotation-based citation shape.
+Built on lessons from [`stnly/pi-grok`](https://github.com/stnly/pi-grok) and
+[Hermes Agent](https://github.com/NousResearch/hermes-agent), which were useful
+prior art for pi integration and for xAI's annotation-based citation shape.
 
 ## Contributing
 
-Issues and PRs are welcome. Keep the core invariants intact: official xAI origin
-only, host-owned credentials only, annotation-derived sources, bounded untrusted
-content, and no acceptance of an answer that never searched.
+Issues and PRs are welcome. Keep the invariants intact: the official xAI origin
+only, credentials owned by the host, sources taken from annotations, untrusted
+content bounded, and no answer accepted that never searched.
 
 ## License
 

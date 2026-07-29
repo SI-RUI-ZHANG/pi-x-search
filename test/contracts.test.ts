@@ -98,9 +98,10 @@ test("parses output text and annotation citations, then deduplicates top-level c
 							{
 								type: "url_citation",
 								url: "https://x.com/a/status/1",
-								title: "A post",
-								start_index: 7,
-								end_index: 20,
+								// xAI's live shape: the title restates the URL.
+								title: "https://x.com/a/status/1",
+								start_index: 0,
+								end_index: 0,
 							},
 							{ type: "url_citation", url: "javascript:alert(1)" },
 						],
@@ -117,15 +118,11 @@ test("parses output text and annotation citations, then deduplicates top-level c
 		2,
 		"the flat path remains a defensive fallback",
 	);
-	assert.deepEqual(parsed.sources, [
-		{
-			url: "https://x.com/a/status/1",
-			title: "A post",
-			startIndex: 7,
-			endIndex: 20,
-		},
-		{ url: "https://x.com/b/status/2" },
-	]);
+	assert.deepEqual(
+		parsed.sources,
+		[{ url: "https://x.com/a/status/1" }, { url: "https://x.com/b/status/2" }],
+		"a title that only restates the URL is dropped instead of printed twice",
+	);
 });
 
 test("model-facing content stays bounded and excludes credential metadata", () => {
