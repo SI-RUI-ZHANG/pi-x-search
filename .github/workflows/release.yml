@@ -149,19 +149,23 @@ jobs:
           const expectedSha512 = Buffer.from(expectedIntegrity.split("-", 2)[1], "base64").toString("hex");
           const metadataUrl = `https://registry.npmjs.org/${encodeURIComponent(name)}/${encodeURIComponent(version)}`;
 
+          // Registry metadata, the attestations endpoint, and the provenance inside it become
+          // visible at different times, so anything still propagating reports "pending" and is
+          // retried. Only a genuine mismatch throws, and it throws on the first attempt.
           async function inspect() {
             const response = await fetch(metadataUrl, { headers: { accept: "application/json" } });
             if (response.status === 404) return { state: "absent" };
+            if (response.status >= 500) return { state: "pending", detail: `registry returned HTTP ${response.status}` };
             if (!response.ok) throw new Error(`registry returned HTTP ${response.status}`);
             const metadata = await response.json();
             if (metadata.dist?.integrity !== expectedIntegrity) throw new Error("published integrity differs from tested artifact");
             const attestationUrl = metadata.dist?.attestations?.url;
-            if (!attestationUrl) throw new Error("published package has no attestations URL");
+            if (!attestationUrl) return { state: "pending", detail: "attestations URL is not published yet" };
             const attestationsResponse = await fetch(attestationUrl);
-            if (!attestationsResponse.ok) throw new Error(`attestations returned HTTP ${attestationsResponse.status}`);
+            if (!attestationsResponse.ok) return { state: "pending", detail: `attestations returned HTTP ${attestationsResponse.status}` };
             const attestations = await attestationsResponse.json();
             const provenance = attestations.attestations?.find((item) => item.predicateType === "https://slsa.dev/provenance/v1");
-            if (!provenance) throw new Error("published package has no SLSA provenance");
+            if (!provenance) return { state: "pending", detail: "SLSA provenance is not published yet" };
             const bundle = typeof provenance.bundle === "string" ? JSON.parse(provenance.bundle) : provenance.bundle;
             const statement = JSON.parse(Buffer.from(bundle.dsseEnvelope.payload, "base64").toString("utf8"));
             const external = statement.predicate?.buildDefinition?.externalParameters;
@@ -176,21 +180,19 @@ jobs:
           }
 
           if (mode === "preflight") {
+            // Only a fully absent version needs publishing; a pending one is already up there.
             const result = await inspect();
             appendFileSync(process.env.GITHUB_OUTPUT, `publish_required=${result.state === "absent"}\n`);
           } else if (mode === "wait") {
-            let lastError;
-            for (let attempt = 0; attempt < 24; attempt += 1) {
-              try {
-                const result = await inspect();
-                if (result.state === "valid") process.exit(0);
-              } catch (error) {
-                lastError = error;
-                if (!String(error.message).includes("registry returned HTTP 5")) throw error;
-              }
+            let detail = "no attempt completed";
+            for (let attempt = 0; attempt < 60; attempt += 1) {
+              const result = await inspect();
+              if (result.state === "valid") process.exit(0);
+              detail = result.detail ?? `published version is ${result.state}`;
+              console.log(`attempt ${attempt + 1}: ${detail}`);
               await new Promise((resolve) => setTimeout(resolve, 5000));
             }
-            throw lastError ?? new Error("published package did not become visible with valid provenance");
+            throw new Error(`published package did not become verifiable within the wait window: ${detail}`);
           } else {
             throw new Error(`unknown mode: ${mode}`);
           }

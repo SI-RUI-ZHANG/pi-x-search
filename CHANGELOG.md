@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Retry release verification while the registry is still propagating, instead of
+  failing the run. Genuine provenance mismatches still fail on the first check.
+
 ## 0.1.1 - 2026-07-30
 
 - Drop source titles that only restate the URL, so the model reads each source
