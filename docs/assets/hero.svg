@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="Illustrative pi-x-search terminal demo with placeholder post text and source URL">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111b"/>
+      <stop offset="0.58" stop-color="#0b1723"/>
+      <stop offset="1" stop-color="#101923"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1d9bf0"/>
+      <stop offset="1" stop-color="#79c8ff"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="1080" cy="70" r="190" fill="#1d9bf0" opacity="0.08" filter="url(#glow)"/>
+  <path d="M80 178 H1120" stroke="#1d9bf0" stroke-width="1" opacity="0.22"/>
+
+  <text x="80" y="100" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="46" font-weight="700" fill="#f0f6fc">pi-x-search</text>
+  <text x="80" y="145" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="21" fill="#8ea2b5">the post's actual words — with a link to verify them</text>
+  <text x="1060" y="112" text-anchor="end" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#1d9bf0">OFFICIAL XAI API</text>
+
+  <rect x="80" y="204" width="1040" height="370" rx="14" fill="#02070c" stroke="#263849" stroke-width="1.5"/>
+  <circle cx="112" cy="236" r="7" fill="#ff5f56"/>
+  <circle cx="136" cy="236" r="7" fill="#ffbd2e"/>
+  <circle cx="160" cy="236" r="7" fill="#27c93f"/>
+  <text x="1088" y="242" text-anchor="end" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#53687a">x_search</text>
+
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">
+    <text x="112" y="298" font-size="19" fill="#1d9bf0">❯ Search X for &lt;topic&gt; from @&lt;handle&gt;</text>
+
+    <rect x="112" y="326" width="448" height="34" rx="17" fill="#0d2536" stroke="#1d9bf0" stroke-width="1"/>
+    <text x="132" y="349" font-size="15" font-weight="600" fill="#79c8ff">N sources · M search calls · subscription</text>
+
+    <text x="112" y="410" font-size="17" fill="#6e8294">VERBATIM POST</text>
+    <rect x="112" y="430" width="8" height="71" rx="4" fill="url(#accent)"/>
+    <text x="146" y="463" font-size="25" font-weight="700" fill="#f0f6fc">“&lt;verbatim post text&gt;”</text>
+    <text x="146" y="495" font-size="17" fill="#79c8ff">x.com/&lt;handle&gt;/status/&lt;post-id&gt;</text>
+
+    <text x="112" y="544" font-size="15" fill="#526678">annotation-derived URLs · zero-search answers rejected · no borrowed credentials</text>
+  </g>
+</svg>

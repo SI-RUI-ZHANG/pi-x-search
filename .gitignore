@@ -1,0 +1,27 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+*.tgz
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# ── Internal AI/workflow layer: never part of the open-source surface ──
+# Tracked = public. Everything below stays local; internal/ is its own
+# private git repository, and AGENTS.md / .agents are symlinks into it.
+# No trailing slashes: entries must match whether the path is a directory
+# or a symlink.
+/AGENTS.md
+/CLAUDE.md
+/CONTEXT.md
+/internal
+/.agents
+/.claude
+/.cursor
+/.opencode
+/.pi-subagents
+/.playwright-mcp
+/.playwright-cli

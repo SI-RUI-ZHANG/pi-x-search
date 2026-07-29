@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Verify packed extension loads
+        shell: bash
+        run: |
+          npm pack --json > pack.json
+          package_file=$(node -e 'const p=require("./pack.json"); process.stdout.write(p[0].filename)')
+          package_dir=$(mktemp -d)
+          trap 'rm -rf "$package_dir" "$package_file" pack.json' EXIT
+          tar -xzf "$package_file" -C "$package_dir"
+          ./node_modules/.bin/pi --offline \
+            --no-extensions --no-skills --no-prompt-templates --no-context-files \
+            -e "$package_dir/package/extensions/x-search.ts" \
+            --list-models xai
