@@ -103,8 +103,6 @@ export interface XSearchRequestPayload {
 export interface XSearchSource {
 	url: string;
 	title?: string;
-	startIndex?: number;
-	endIndex?: number;
 }
 
 export interface ParsedXSearchResponse {
@@ -239,10 +237,6 @@ function safeHttpsUrl(value: unknown): string | undefined {
 	}
 }
 
-function optionalInteger(value: unknown): number | undefined {
-	return Number.isInteger(value) && (value as number) >= 0 ? (value as number) : undefined;
-}
-
 export function xSearchCallCount(payload: unknown): number {
 	if (!isRecord(payload) || !isRecord(payload.usage)) return 0;
 	const details = payload.usage.server_side_tool_usage_details;
@@ -266,15 +260,9 @@ export function parseSearchResponse(payload: unknown): ParsedXSearchResponse {
 		if (!url || seen.has(url)) return;
 		seen.add(url);
 		const cleanTitle = typeof raw?.title === "string" ? sanitizeUntrustedText(raw.title).trim() : "";
-		const title = cleanTitle || undefined;
-		const startIndex = optionalInteger(raw?.start_index);
-		const endIndex = optionalInteger(raw?.end_index);
-		sources.push({
-			url,
-			...(title ? { title } : {}),
-			...(startIndex !== undefined ? { startIndex } : {}),
-			...(endIndex !== undefined ? { endIndex } : {}),
-		});
+		// xAI titles every annotation with the URL itself; keep a title only when it says something else.
+		const title = cleanTitle && safeHttpsUrl(cleanTitle) !== url ? cleanTitle : undefined;
+		sources.push({ url, ...(title ? { title } : {}) });
 	};
 
 	if (Array.isArray(payload.output)) {
